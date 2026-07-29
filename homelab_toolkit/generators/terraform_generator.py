@@ -113,8 +113,8 @@ runcmd:
 EOF
 }}
 
-data "template_file" "compose" {{
-  template = file("${{{{path.module}}}}/../docker-compose.yml")
+output "compose_content" {{
+  value = templatefile("${{{{abspath(path.module)}}}}/../docker-compose.yml", {{}})
 }}
 """
         self._write_file(tf / "main.tf", content)

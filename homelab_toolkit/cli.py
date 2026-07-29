@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -33,20 +34,23 @@ def init(name):
     if cfg.exists():
         click.confirm(f"{CONFIG_FILE} already exists. Override?", abort=True)
 
-    config = {
-        "homelab": {
-            "name": name,
-            "description": "Personal homelab",
-            "network": {"subnet": "192.168.1.0/24", "gateway": "192.168.1.1"},
-            "services": None,
-        },
-        "backup": {"enabled": True, "retention_days": 7},
-    }
-    raw = yaml.dump(config, default_flow_style=False, sort_keys=False)
-    raw = raw.replace(
-        "services: null",
-        "services:\n  # monitoring:\n  #   enabled: true\n  #   stack:\n  #     - prometheus\n  #     - grafana\n  #\n  # media:\n  #   enabled: true\n  #   stack:\n  #     - jellyfin\n  #     - radarr\n  #     - sonarr",
-    )
+    raw = f"""homelab:
+  name: {name}
+  description: Personal homelab
+  network:
+    subnet: 192.168.1.0/24
+    gateway: 192.168.1.1
+  services:
+    # monitoring:
+    #   enabled: true
+    #   stack:
+    #     - prometheus
+    #     - grafana
+
+backup:
+  enabled: true
+  retention_days: 7
+"""
     cfg.write_text(raw)
     console.print(f"[green]v[/green] Created {CONFIG_FILE}")
     console.print("Edit the file then run [bold]homelab validate[/bold] to check it.")
@@ -111,14 +115,11 @@ def deploy(stack, output):
             cmd.extend(["up", "-d"])
             console.print("[blue]->[/blue] Deploying all services...")
 
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(cmd)
         if r.returncode == 0:
             console.print("[green]v[/green] Done")
-            if r.stdout:
-                console.print(r.stdout)
         else:
-            console.print(f"[red]x[/red] Deploy failed:")
-            console.print(r.stderr)
+            console.print(f"[red]x[/red] Deploy failed (exit {r.returncode})")
     except FileNotFoundError:
         console.print("[red]x[/red] Docker not found")
 
@@ -157,15 +158,17 @@ def status(output):
 
         console.print(table)
     except FileNotFoundError:
-        console.print("[red]x[/red] Docker not installed")
-    except subprocess.CalledProcessError:
-        console.print("[red]x[/red] Failed to get status")
+        console.print("[red]x[/red] Docker not found")
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]x[/red] Docker error: {e.stderr or e}")
 
 
 @cli.command()
 @click.option("--stack", "-s")
+@click.option("--follow", "-f", is_flag=True, help="Follow log output")
+@click.option("--tail", default=50, help="Number of lines to show")
 @click.option("--output", "-o", default="output")
-def logs(stack, output):
+def logs(stack, follow, tail, output):
     """Tail logs for services."""
     compose = Path(output) / "docker-compose.yml"
     if not compose.exists():
@@ -173,15 +176,13 @@ def logs(stack, output):
         raise click.Abort()
 
     try:
-        cmd = ["docker", "compose", "-f", str(compose), "logs", "--tail=50"]
+        cmd = ["docker", "compose", "-f", str(compose), "logs", f"--tail={tail}"]
+        if follow:
+            cmd.append("-f")
         if stack:
             cmd.append(stack)
-            console.print(f"[blue]->[/blue] Logs: [bold]{stack}[/bold]")
-        else:
-            console.print("[blue]->[/blue] All services:")
 
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        console.print(r.stdout or "[dim]empty[/dim]")
+        subprocess.run(cmd)
     except FileNotFoundError:
         console.print("[red]x[/red] Docker not found")
 
@@ -247,6 +248,12 @@ def backup(action, output, backup_file):
             console.print(f"[red]x[/red] File not found: {bp}")
             return
 
+        r = subprocess.run(["tar", "tzf", str(bp)], capture_output=True, text=True)
+        for entry in r.stdout.split("\n"):
+            if ".." in entry or entry.startswith("/"):
+                console.print(f"[red]x[/red] Unsafe backup file (path traversal): {entry}")
+                return
+
         subprocess.run(["tar", "xzf", str(bp)], check=True)
         console.print(f"[green]v[/green] Restored from: [bold]{bp}[/bold]")
 
@@ -267,8 +274,8 @@ def backup(action, output, backup_file):
         for b in backups:
             size = b.stat().st_size
             sz = f"{size / 1024:.0f} KB" if size < 1024 * 1024 else f"{size / (1024*1024):.1f} MB"
-            date = subprocess.run(["date", "-r", str(b), "+%Y-%m-%d %H:%M"], capture_output=True, text=True).stdout.strip()
-            table.add_row(b.name, sz, date)
+            mtime = datetime.fromtimestamp(b.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            table.add_row(b.name, sz, mtime)
         console.print(table)
 
 

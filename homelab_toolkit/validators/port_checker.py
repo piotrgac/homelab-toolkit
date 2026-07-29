@@ -22,6 +22,8 @@ class PortChecker:
         if not isinstance(services, dict):
             return warnings
         for cat, cfg in services.items():
+            if not isinstance(cfg, dict):
+                continue
             ports = cfg.get("ports", {})
             for name, port in ports.items():
                 if isinstance(port, int) and not self.check_local_port(port):

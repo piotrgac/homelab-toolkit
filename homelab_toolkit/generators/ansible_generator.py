@@ -49,8 +49,10 @@ ansible_python_interpreter=/usr/bin/python3
 
     def _write_site_playbook(self, ansible_dir, services):
         items = []
+        if not isinstance(services, dict):
+            services = {}
         for cat, cfg in services.items():
-            if not cfg.get("enabled", True):
+            if not isinstance(cfg, dict) or not cfg.get("enabled", True):
                 continue
             for svc in cfg.get("stack", []):
                 items.append(f"        - {svc}")
@@ -138,10 +140,12 @@ ansible_python_interpreter=/usr/bin/python3
 
     - name: Backup docker volumes
       shell: |
-        docker run --rm \\
-          -v homelab-net:/volume \\
-          -v {{{{ dest }}}}:/backup \\
-          alpine tar czf "/backup/volumes-$(date +%Y%m%d-%H%M%S).tar.gz" -C /volume .
+        for vol in $(docker volume ls -q); do
+          docker run --rm \\
+            -v "${{vol}}:/volume" \\
+            -v {{{{ dest }}}}:/backup \\
+            alpine tar czf "/backup/${{vol}}-$(date +%Y%m%d-%H%M%S).tar.gz" -C /volume .
+        done
       ignore_errors: yes
 
     - name: Cleanup old backups
@@ -160,7 +164,7 @@ ansible_python_interpreter=/usr/bin/python3
         self._write_file(ansible_dir / "playbooks" / "backup.yml", content)
 
     def _write_monitoring_playbook(self, ansible_dir, services):
-        mon = services.get("monitoring", {})
+        mon = services.get("monitoring", {}) if isinstance(services, dict) else {}
         if not mon.get("enabled"):
             return
 

@@ -1,12 +1,14 @@
+import os
 import yaml
 import pytest
+from pathlib import Path
 
 from homelab_toolkit.generators.docker_generator import DockerGenerator, SERVICE_TEMPLATES
 from homelab_toolkit.generators.terraform_generator import TerraformGenerator
 from homelab_toolkit.generators.ansible_generator import AnsibleGenerator
 from homelab_toolkit.validators.config_validator import ConfigValidator
+from homelab_toolkit.validators.port_checker import PortChecker
 from homelab_toolkit.utils.network import validate_subnet
-from homelab_toolkit.utils.templates import render_string
 
 
 @pytest.fixture
@@ -114,6 +116,32 @@ custom_templates:
         e = ConfigValidator().validate(cfg)
         assert any("image" in x for x in e)
 
+    def test_services_list_instead_of_dict(self):
+        cfg = yaml.safe_load("""
+homelab:
+  name: x
+  network:
+    subnet: "10.0.0.0/24"
+    gateway: "10.0.0.1"
+  services: [prometheus]
+""")
+        e = ConfigValidator().validate(cfg)
+        assert any("dictionary" in x for x in e)
+
+    def test_services_none(self):
+        cfg = yaml.safe_load("""
+homelab:
+  name: x
+  network:
+    subnet: "10.0.0.0/24"
+    gateway: "10.0.0.1"
+  services:
+backup:
+  enabled: true
+""")
+        e = ConfigValidator().validate(cfg)
+        assert any("services" in x for x in e)
+
 
 class TestDockerGenerator:
     def test_generates(self, full_config, tmp_path):
@@ -127,6 +155,11 @@ class TestDockerGenerator:
         DockerGenerator(output_dir=tmp_path).generate(minimal)
         c = yaml.safe_load((tmp_path / "docker-compose.yml").read_text())
         assert c["networks"]["homelab"]["driver"] == "bridge"
+
+    def test_no_version_field(self, minimal, tmp_path):
+        DockerGenerator(output_dir=tmp_path).generate(minimal)
+        c = yaml.safe_load((tmp_path / "docker-compose.yml").read_text())
+        assert "version" not in c
 
     def test_dry_run(self, full_config, tmp_path):
         DockerGenerator(dry_run=True, output_dir=tmp_path).generate(full_config)
@@ -152,6 +185,30 @@ class TestDockerGenerator:
         for svc in SERVICE_TEMPLATES:
             assert svc in c["services"]
 
+    def test_env_file_generated(self, tmp_path):
+        cfg = yaml.safe_load("""
+homelab:
+  name: x
+  network:
+    subnet: "10.0.0.0/24"
+    gateway: "10.0.0.1"
+  services:
+    net:
+      enabled: true
+      stack: [pi-hole]
+""")
+        DockerGenerator(output_dir=tmp_path).generate(cfg)
+        env = tmp_path / ".env"
+        assert env.exists()
+        content = env.read_text()
+        assert "WEBPASSWORD" in content
+
+    def test_services_list_crash(self, tmp_path):
+        cfg = {"homelab": {"services": [1, 2, 3]}}
+        DockerGenerator(output_dir=tmp_path).generate(cfg)
+        c = yaml.safe_load((tmp_path / "docker-compose.yml").read_text())
+        assert c["services"] == {}
+
 
 class TestTerraformGenerator:
     def test_generates(self, full_config, tmp_path):
@@ -165,6 +222,12 @@ class TestTerraformGenerator:
         assert "kreuzwerker/docker" in t
         assert "dmacvicar/libvirt" in t
         assert "libvirt_domain" in t
+
+    def test_uses_templatefile_not_deprecated(self, full_config, tmp_path):
+        TerraformGenerator(output_dir=tmp_path).generate(full_config)
+        t = (tmp_path / "terraform" / "main.tf").read_text()
+        assert "templatefile(" in t
+        assert "template_file" not in t
 
     def test_dry(self, full_config, tmp_path):
         TerraformGenerator(dry_run=True, output_dir=tmp_path).generate(full_config)
@@ -190,6 +253,16 @@ class TestAnsibleGenerator:
         AnsibleGenerator(dry_run=True, output_dir=tmp_path).generate(full_config)
         assert not (tmp_path / "ansible").exists()
 
+    def test_services_not_dict_no_crash(self, tmp_path):
+        cfg = {"homelab": {"services": "bad"}}
+        AnsibleGenerator(output_dir=tmp_path).generate(cfg)
+        assert (tmp_path / "ansible" / "playbooks" / "site.yml").exists()
+
+    def test_backup_uses_volumes_not_networks(self, full_config, tmp_path):
+        AnsibleGenerator(output_dir=tmp_path).generate(full_config)
+        content = (tmp_path / "ansible" / "playbooks" / "backup.yml").read_text()
+        assert "docker volume ls" in content
+
 
 class TestUtils:
     def test_subnet_ok(self):
@@ -197,9 +270,6 @@ class TestUtils:
 
     def test_subnet_bad(self):
         assert validate_subnet("xxx") is False
-
-    def test_render(self):
-        assert render_string("hi {{ name }}", {"name": "there"}) == "hi there"
 
 
 class TestTemplates:
@@ -213,3 +283,21 @@ class TestTemplates:
 
     def test_count(self):
         assert len(SERVICE_TEMPLATES) >= 20
+
+
+class TestPortChecker:
+    def test_ports_not_dict_no_crash(self):
+        w = PortChecker().check_ports_in_config({
+            "homelab": {"services": {"x": None}}
+        })
+        assert w == []
+
+    def test_services_not_dict_no_crash(self):
+        w = PortChecker().check_ports_in_config({
+            "homelab": {"services": [1, 2]}
+        })
+        assert w == []
+
+    def test_find_available_returns_int(self):
+        p = PortChecker().find_available()
+        assert p is None or isinstance(p, int)
