@@ -10,5 +10,6 @@ venv/
 *.retry
 *.log
 .env
+homelab.yaml
 .pytest_cache/
 output/
