@@ -38,11 +38,16 @@ def init(name):
             "name": name,
             "description": "Personal homelab",
             "network": {"subnet": "192.168.1.0/24", "gateway": "192.168.1.1"},
-            "services": {},
+            "services": None,
         },
         "backup": {"enabled": True, "retention_days": 7},
     }
-    cfg.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
+    raw = yaml.dump(config, default_flow_style=False, sort_keys=False)
+    raw = raw.replace(
+        "services: null",
+        "services:\n  # monitoring:\n  #   enabled: true\n  #   stack:\n  #     - prometheus\n  #     - grafana\n  #\n  # media:\n  #   enabled: true\n  #   stack:\n  #     - jellyfin\n  #     - radarr\n  #     - sonarr",
+    )
+    cfg.write_text(raw)
     console.print(f"[green]v[/green] Created {CONFIG_FILE}")
     console.print("Edit the file then run [bold]homelab validate[/bold] to check it.")
 

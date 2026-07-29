@@ -28,7 +28,7 @@ class ConfigValidator:
 
         services = homelab.get("services")
         if not services:
-            errors.append("No services defined under 'homelab.services'")
+            errors.append("No services defined under 'homelab.services' - add at least one category with a stack")
         else:
             self._check_services(services, errors, config.get("custom_templates", {}))
 

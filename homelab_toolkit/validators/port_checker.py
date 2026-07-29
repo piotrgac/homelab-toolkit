@@ -19,6 +19,8 @@ class PortChecker:
     def check_ports_in_config(self, config):
         warnings = []
         services = config.get("homelab", {}).get("services", {})
+        if not isinstance(services, dict):
+            return warnings
         for cat, cfg in services.items():
             ports = cfg.get("ports", {})
             for name, port in ports.items():
