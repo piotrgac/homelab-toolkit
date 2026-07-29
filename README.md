@@ -46,7 +46,7 @@ The config file is the single source of truth. Three generators consume it and p
 ## Installation
 
 ```bash
-git clone https://github.com/TWOJ_USER/homelab-toolkit.git
+git clone https://github.com/piotrgac/homelab-toolkit.git
 cd homelab-toolkit
 pip install .
 ```
