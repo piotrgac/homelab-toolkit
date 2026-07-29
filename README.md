@@ -80,6 +80,7 @@ homelab status
 
 | Command | Description |
 |---------|-------------|
+| `homelab -c my-config.yaml init` | Create a skeleton with a custom config path |
 | `homelab init [name]` | Create a skeleton `homelab.yaml`. Default name: my-homelab |
 | `homelab generate` | Run all generators. Output goes to `output/` by default |
 | `homelab generate --dry-run` | Print generated files to stdout, don't write anything |
@@ -96,6 +97,8 @@ homelab status
 | `homelab backup create` | Archive config and generated files to `output/backups/` |
 | `homelab backup list` | List available backups with size and date |
 | `homelab backup restore -f backup.tar.gz` | Restore config and generated files |
+| `homelab down` | Stop and remove containers |
+| `homelab pull` | Pull latest service images |
 | `homelab clean` | Remove the output directory |
 
 ## Config reference
@@ -327,10 +330,9 @@ Generates 5 playbooks. Each playbook is a standalone file in `ansible/playbooks/
 ### Setup
 
 ```bash
-git clone https://github.com/TWOJ_USER/homelab-toolkit.git
+git clone https://github.com/piotrgac/homelab-toolkit.git
 cd homelab-toolkit
 pip install -e .
-pip install pytest
 ```
 
 ### Code style
