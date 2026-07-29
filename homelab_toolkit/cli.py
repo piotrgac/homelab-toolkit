@@ -331,11 +331,21 @@ def template_cmd(action, name):
 def clean(output):
     """Remove generated output directory."""
     p = Path(output)
-    if p.exists():
+    if not p.exists():
+        console.print("[yellow]![/yellow] Nothing to clean")
+        return
+
+    try:
         shutil.rmtree(p)
         console.print(f"[green]v[/green] Removed {p}/")
-    else:
-        console.print("[yellow]![/yellow] Nothing to clean")
+    except PermissionError:
+        import subprocess as sp
+        console.print("[yellow]![/yellow] Permission denied, trying sudo...")
+        r = sp.run(["sudo", "rm", "-rf", str(p)], capture_output=True, text=True)
+        if r.returncode == 0:
+            console.print(f"[green]v[/green] Removed {p}/")
+        else:
+            console.print(f"[red]x[/red] Failed: {r.stderr}")
 
 
 if __name__ == "__main__":
