@@ -103,7 +103,7 @@ def deploy(stack, output):
             cmd.extend(["up", "-d", stack])
             console.print(f"[blue]->[/blue] Deploying stack: [bold]{stack}[/bold]")
         else:
-            cmd.append("up -d")
+            cmd.extend(["up", "-d"])
             console.print("[blue]->[/blue] Deploying all services...")
 
         r = subprocess.run(cmd, capture_output=True, text=True)
