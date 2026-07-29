@@ -10,6 +10,16 @@ homelab generate -o deploy/
 homelab deploy
 ```
 
+## Screenshots
+
+| `homelab template list` | `homelab template show postgres` |
+|:---:|:---:|
+| <img src="docs/screenshots/template-list.svg" width="420"> | <img src="docs/screenshots/template-show.svg" width="420"> |
+
+| `homelab validate` (pass) | `homelab validate` (errors) |
+|:---:|:---:|
+| <img src="docs/screenshots/validate-ok.svg" width="200"> | <img src="docs/screenshots/validate-errors.svg" width="420"> |
+
 ## Table of contents
 
 - [Motivation](#motivation)
