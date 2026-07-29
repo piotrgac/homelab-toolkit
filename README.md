@@ -91,7 +91,7 @@ homelab status
 | `homelab status` | Show running containers with ports |
 | `homelab logs --stack jellyfin` | Tail last 50 log lines |
 | `homelab validate` | Check config structure and port availability |
-| `homelab template list` | List all 23 built-in templates with ports |
+| `homelab template list` | List all 22 built-in templates with ports |
 | `homelab template show postgres` | Show template yaml and usage example |
 | `homelab backup create` | Archive config and generated files to `output/backups/` |
 | `homelab backup list` | List available backups with size and date |
@@ -168,7 +168,7 @@ homelab.yaml
       │
       ├──► DockerGenerator     ──► docker-compose.yml
       │       │
-      │       ├── SERVICE_TEMPLATES (23 built-in)
+      │       ├── SERVICE_TEMPLATES (22 built-in)
       │       └── custom_templates from config
       │
       ├──► TerraformGenerator  ──► terraform/main.tf
@@ -191,7 +191,6 @@ Each generator reads the same config object independently. They share no state a
 For a config with prometheus and grafana enabled, the generator produces:
 
 ```yaml
-version: "3.8"
 services:
   prometheus:
     image: prom/prometheus:latest
@@ -216,7 +215,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 10.0.0.0/24
 ```
 
 ### Example output: ansible playbook
@@ -251,7 +250,7 @@ The monitoring playbook configures prometheus and grafana on the target host:
 
 ## Templates
 
-23 built-in templates across 7 categories:
+22 built-in templates across 7 categories:
 
 | Category | Services | Ports |
 |----------|----------|-------|
@@ -364,7 +363,7 @@ Tests cover:
 - Docker generator (output structure, dry-run, disabled services, all templates)
 - Terraform generator (file creation, dry-run, content checks)
 - Ansible generator (playbook count, conditional skips, dry-run)
-- Utilities (subnet validation, jinja2 rendering)
+- Utilities (subnet validation)
 - Template integrity (all have image and restart policy)
 
 ## Tests
@@ -374,7 +373,7 @@ pip install pytest
 pytest tests/ -v
 ```
 
-22 tests, all passing. Test files use `tmp_path` fixtures to avoid writing to the source tree.
+32 tests, all passing. Test files use `tmp_path` fixtures to avoid writing to the source tree.
 
 ## Project structure
 
@@ -382,26 +381,17 @@ pytest tests/ -v
 ├── homelab_toolkit/
 │   ├── __init__.py             # version
 │   ├── cli.py                  # CLI entry point, 9 commands
-│   ├── config/
-│   │   └── config_parser.py    # YAML file parsing
 │   ├── generators/
-│   │   ├── docker_generator.py # docker-compose + 23 templates
+│   │   ├── docker_generator.py # docker-compose + 22 templates
 │   │   ├── terraform_generator.py
 │   │   └── ansible_generator.py
-│   ├── modules/                # stack definitions for reference
-│   │   ├── monitoring.py
-│   │   ├── networking.py
-│   │   ├── storage.py
-│   │   ├── security.py
-│   │   └── media.py
 │   ├── validators/
 │   │   ├── config_validator.py # structural validation
 │   │   └── port_checker.py     # local port availability
 │   └── utils/
-│       ├── network.py          # subnet helpers
-│       └── templates.py        # jinja2 wrapper
+│       └── network.py          # subnet helpers
 ├── tests/
-│   └── test_generators.py      # 22 test cases
+│   └── test_generators.py      # 32 test cases
 ├── examples/
 │   └── homelab.yaml            # annotated example config
 ├── .env.example                # env var reference

@@ -1,18 +1,20 @@
 from pathlib import Path
 from rich.console import Console
+from homelab_toolkit.generators.docker_generator import SERVICE_TEMPLATES
 
 console = Console()
 
 
 class AnsibleGenerator:
-    def __init__(self, dry_run=False, output_dir=Path("output")):
+    def __init__(self, dry_run: bool = False, output_dir: Path = Path("output")) -> None:
         self.dry_run = dry_run
         self.output_dir = output_dir
 
-    def generate(self, config):
+    def generate(self, config: dict) -> None:
         homelab = config.get("homelab", {})
         services = homelab.get("services", {})
         backup = config.get("backup", {})
+        custom_templates = config.get("custom_templates", {})
 
         ansible_dir = self.output_dir / "ansible"
         if not self.dry_run:
@@ -20,7 +22,7 @@ class AnsibleGenerator:
             (ansible_dir / "roles").mkdir(parents=True, exist_ok=True)
 
         self._write_inventory(ansible_dir, homelab)
-        self._write_site_playbook(ansible_dir, services)
+        self._write_site_playbook(ansible_dir, services, custom_templates)
         self._write_docker_playbook(ansible_dir)
         self._write_backup_playbook(ansible_dir, backup)
         self._write_monitoring_playbook(ansible_dir, services)
@@ -47,18 +49,25 @@ ansible_python_interpreter=/usr/bin/python3
 """
         self._write_file(ansible_dir / "inventory.ini", content)
 
-    def _write_site_playbook(self, ansible_dir, services):
-        items = []
+    def _write_site_playbook(self, ansible_dir, services, custom_templates=None):
+        if custom_templates is None:
+            custom_templates = {}
+        dir_items = []
+        image_items = []
         if not isinstance(services, dict):
             services = {}
         for cat, cfg in services.items():
             if not isinstance(cfg, dict) or not cfg.get("enabled", True):
                 continue
             for svc in cfg.get("stack", []):
-                items.append(f"        - {svc}")
+                dir_items.append(f"        - {svc}")
+                tmpl = SERVICE_TEMPLATES.get(svc) or custom_templates.get(svc)
+                img = tmpl["image"] if tmpl else svc
+                image_items.append(f"        - {img}")
 
-        if not items:
-            items.append("        - none")
+        if not dir_items:
+            dir_items.append("        - none")
+            image_items.append("        - none")
 
         content = f"""---
 - name: Provision homelab services
@@ -78,14 +87,14 @@ ansible_python_interpreter=/usr/bin/python3
         state: directory
         mode: "0755"
       loop:
-{chr(10).join(items)}
+{chr(10).join(dir_items)}
 
     - name: Pull service images
       community.docker.docker_image:
         name: "{{{{ item }}}}"
         source: pull
       loop:
-{chr(10).join(items)}
+{chr(10).join(image_items)}
 """
         self._write_file(ansible_dir / "playbooks" / "site.yml", content)
 

@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+import tarfile
 from datetime import datetime
 from pathlib import Path
 
@@ -20,19 +21,50 @@ console = Console()
 CONFIG_FILE = "homelab.yaml"
 
 
+def _read_config(path=None):
+    path = path or CONFIG_FILE
+    cfg = Path(path)
+    if not cfg.exists():
+        console.print(f"[red]x[/red] Config not found: {path}")
+        raise click.Abort()
+    try:
+        return yaml.safe_load(cfg.read_text())
+    except yaml.YAMLError as e:
+        console.print(f"[red]x[/red] Invalid YAML in {path}: {e}")
+        raise click.Abort()
+
+
+def _resolve_stack(stack_name, config_path=None):
+    config = _read_config(config_path)
+    services = config.get("homelab", {}).get("services", {})
+    if not isinstance(services, dict):
+        return [stack_name]
+    for cat, cfg in services.items():
+        if cat != stack_name:
+            continue
+        if isinstance(cfg, dict) and cfg.get("stack"):
+            return cfg["stack"]
+    return [stack_name]
+
+
 @click.group()
 @click.version_option()
-def cli():
-    pass
+@click.option("--config", "-c", default="homelab.yaml", envvar="HOMELAB_CONFIG", show_default=True)
+@click.pass_context
+def cli(ctx, config):
+    ctx.ensure_object(dict)
+    ctx.obj["config"] = config
 
 
 @cli.command()
 @click.argument("name", default="my-homelab")
-def init(name):
+@click.pass_context
+def init(ctx, name):
     """Create a new homelab project skeleton."""
-    cfg = Path(CONFIG_FILE)
+    config_path = ctx.obj["config"]
+    cfg = Path(config_path)
     if cfg.exists():
-        click.confirm(f"{CONFIG_FILE} already exists. Override?", abort=True)
+        click.confirm(f"{config_path} already exists. Override?", abort=True)
 
     raw = f"""homelab:
   name: {name}
@@ -62,14 +94,10 @@ backup:
 @click.option("--terraform/--no-terraform", default=True)
 @click.option("--ansible/--no-ansible", default=True)
 @click.option("--dry-run", is_flag=True)
-def generate(output, docker, terraform, ansible, dry_run):
+@click.pass_context
+def generate(ctx, output, docker, terraform, ansible, dry_run):
     """Generate orchestration files from homelab.yaml."""
-    cfg = Path(CONFIG_FILE)
-    if not cfg.exists():
-        console.print("[red]x[/red] No config file. Run [bold]homelab init[/bold] first")
-        raise click.Abort()
-
-    config = yaml.safe_load(cfg.read_text())
+    config = _read_config(ctx.obj["config"])
     errors = ConfigValidator().validate(config)
     if errors:
         for e in errors:
@@ -99,7 +127,8 @@ def generate(output, docker, terraform, ansible, dry_run):
 @cli.command()
 @click.option("--stack", "-s")
 @click.option("--output", "-o", default="output")
-def deploy(stack, output):
+@click.pass_context
+def deploy(ctx, stack, output):
     """Deploy services via docker compose."""
     compose = Path(output) / "docker-compose.yml"
     if not compose.exists():
@@ -109,8 +138,9 @@ def deploy(stack, output):
     try:
         cmd = ["docker", "compose", "-f", str(compose)]
         if stack:
-            cmd.extend(["up", "-d", stack])
-            console.print(f"[blue]->[/blue] Deploying stack: [bold]{stack}[/bold]")
+            services = _resolve_stack(stack, ctx.obj["config"])
+            cmd.extend(["up", "-d"] + services)
+            console.print(f"[blue]->[/blue] Deploying services: [bold]{', '.join(services)}[/bold]")
         else:
             cmd.extend(["up", "-d"])
             console.print("[blue]->[/blue] Deploying all services...")
@@ -120,13 +150,16 @@ def deploy(stack, output):
             console.print("[green]v[/green] Done")
         else:
             console.print(f"[red]x[/red] Deploy failed (exit {r.returncode})")
+            raise click.Abort()
     except FileNotFoundError:
         console.print("[red]x[/red] Docker not found")
+        raise click.Abort()
 
 
 @cli.command()
 @click.option("--output", "-o", default="output")
-def status(output):
+@click.pass_context
+def status(ctx, output):
     """Show running container status."""
     try:
         r = subprocess.run(
@@ -159,8 +192,10 @@ def status(output):
         console.print(table)
     except FileNotFoundError:
         console.print("[red]x[/red] Docker not found")
+        raise click.Abort()
     except subprocess.CalledProcessError as e:
         console.print(f"[red]x[/red] Docker error: {e.stderr or e}")
+        raise click.Abort()
 
 
 @cli.command()
@@ -168,7 +203,8 @@ def status(output):
 @click.option("--follow", "-f", is_flag=True, help="Follow log output")
 @click.option("--tail", default=50, help="Number of lines to show")
 @click.option("--output", "-o", default="output")
-def logs(stack, follow, tail, output):
+@click.pass_context
+def logs(ctx, stack, follow, tail, output):
     """Tail logs for services."""
     compose = Path(output) / "docker-compose.yml"
     if not compose.exists():
@@ -180,22 +216,60 @@ def logs(stack, follow, tail, output):
         if follow:
             cmd.append("-f")
         if stack:
-            cmd.append(stack)
+            services = _resolve_stack(stack, ctx.obj["config"])
+            cmd.extend(services)
 
-        subprocess.run(cmd)
+        r = subprocess.run(cmd)
+        if r.returncode != 0:
+            raise click.Abort()
     except FileNotFoundError:
         console.print("[red]x[/red] Docker not found")
+        raise click.Abort()
 
 
 @cli.command()
-def validate():
-    """Validate homelab.yaml config."""
-    cfg = Path(CONFIG_FILE)
-    if not cfg.exists():
-        console.print("[red]x[/red] No homelab.yaml")
+@click.option("--output", "-o", default="output")
+def down(output):
+    """Stop and remove containers."""
+    compose = Path(output) / "docker-compose.yml"
+    if not compose.exists():
+        console.print("[red]x[/red] No compose file")
         return
+    try:
+        subprocess.run(["docker", "compose", "-f", str(compose), "down"], check=True)
+        console.print("[green]v[/green] Services stopped")
+    except FileNotFoundError:
+        console.print("[red]x[/red] Docker not found")
+        raise click.Abort()
+    except subprocess.CalledProcessError:
+        console.print("[red]x[/red] Failed to stop services")
+        raise click.Abort()
 
-    config = yaml.safe_load(cfg.read_text())
+
+@cli.command()
+@click.option("--output", "-o", default="output")
+def pull(output):
+    """Pull latest service images."""
+    compose = Path(output) / "docker-compose.yml"
+    if not compose.exists():
+        console.print("[red]x[/red] No compose file")
+        return
+    try:
+        subprocess.run(["docker", "compose", "-f", str(compose), "pull"], check=True)
+        console.print("[green]v[/green] Images pulled")
+    except FileNotFoundError:
+        console.print("[red]x[/red] Docker not found")
+        raise click.Abort()
+    except subprocess.CalledProcessError:
+        console.print("[red]x[/red] Failed to pull images")
+        raise click.Abort()
+
+
+@cli.command()
+@click.pass_context
+def validate(ctx):
+    """Validate homelab.yaml config."""
+    config = _read_config(ctx.obj["config"])
     errors = ConfigValidator().validate(config)
     port_warnings = PortChecker().check_ports_in_config(config)
 
@@ -213,18 +287,22 @@ def validate():
         for w in port_warnings:
             console.print(f"  [yellow]![/yellow] {w}")
 
+    if errors or port_warnings:
+        raise click.Abort()
+
 
 @cli.command()
 @click.argument("action", type=click.Choice(["create", "restore", "list"]))
 @click.option("--output", "-o", default="output/backups")
 @click.option("--file", "-f", "backup_file")
-def backup(action, output, backup_file):
+@click.pass_context
+def backup(ctx, action, output, backup_file):
     """Manage config backups."""
     bdir = Path(output)
 
     if action == "create":
         bdir.mkdir(parents=True, exist_ok=True)
-        ts = subprocess.run(["date", "+%Y%m%d-%H%M%S"], capture_output=True, text=True).stdout.strip()
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
         archive = f"homelab-backup-{ts}.tar.gz"
 
         files = ["homelab.yaml"]
@@ -233,7 +311,13 @@ def backup(action, output, backup_file):
             files.append("output")
 
         if all(Path(f).exists() for f in files if f != "output"):
-            subprocess.run(["tar", "czf", str(bdir / archive)] + files, check=True)
+            try:
+                with tarfile.open(str(bdir / archive), "w:gz") as tar:
+                    for f in files:
+                        tar.add(f)
+            except (tarfile.TarError, OSError) as e:
+                console.print(f"[red]x[/red] Backup failed: {e}")
+                raise click.Abort()
             console.print(f"[green]v[/green] Backup saved: [bold]{bdir / archive}[/bold]")
         else:
             console.print("[yellow]![/yellow] Nothing to backup")
@@ -241,20 +325,28 @@ def backup(action, output, backup_file):
     elif action == "restore":
         if not backup_file:
             console.print("[red]x[/red] Specify --file backup.tar.gz")
-            return
+            raise click.Abort()
 
         bp = Path(backup_file)
         if not bp.exists():
             console.print(f"[red]x[/red] File not found: {bp}")
-            return
+            raise click.Abort()
 
-        r = subprocess.run(["tar", "tzf", str(bp)], capture_output=True, text=True)
-        for entry in r.stdout.split("\n"):
-            if ".." in entry or entry.startswith("/"):
-                console.print(f"[red]x[/red] Unsafe backup file (path traversal): {entry}")
-                return
+        try:
+            with tarfile.open(str(bp), "r:gz") as tar:
+                for member in tar.getmembers():
+                    name = Path(member.name)
+                    if name.is_absolute() or ".." in name.parts:
+                        console.print(f"[red]x[/red] Unsafe backup (path traversal): {member.name}")
+                        raise click.Abort()
+                    if member.issym() or member.islnk():
+                        console.print(f"[red]x[/red] Unsafe backup (symlink): {member.name}")
+                        raise click.Abort()
+                tar.extractall()
+        except tarfile.TarError as e:
+            console.print(f"[red]x[/red] Backup error: {e}")
+            raise click.Abort()
 
-        subprocess.run(["tar", "xzf", str(bp)], check=True)
         console.print(f"[green]v[/green] Restored from: [bold]{bp}[/bold]")
 
     elif action == "list":
@@ -314,13 +406,13 @@ def template_cmd(action, name):
     elif action == "show":
         if not name:
             console.print("[red]x[/red] Specify a template name")
-            return
+            raise click.Abort()
 
         t = SERVICE_TEMPLATES.get(name)
         if not t:
             console.print(f"[red]x[/red] Unknown template: {name}")
             console.print("[bold]homelab template list[/bold] to see all templates")
-            return
+            raise click.Abort()
 
         console.print(f"[bold cyan]{name}[/bold cyan]")
         console.print(Syntax(yaml.dump({name: t}, default_flow_style=False, sort_keys=False), "yaml", theme="monokai"))
@@ -335,7 +427,8 @@ def template_cmd(action, name):
 
 @cli.command()
 @click.option("--output", "-o", default="output")
-def clean(output):
+@click.pass_context
+def clean(ctx, output):
     """Remove generated output directory."""
     p = Path(output)
     if not p.exists():
@@ -346,13 +439,8 @@ def clean(output):
         shutil.rmtree(p)
         console.print(f"[green]v[/green] Removed {p}/")
     except PermissionError:
-        import subprocess as sp
-        console.print("[yellow]![/yellow] Permission denied, trying sudo...")
-        r = sp.run(["sudo", "rm", "-rf", str(p)], capture_output=True, text=True)
-        if r.returncode == 0:
-            console.print(f"[green]v[/green] Removed {p}/")
-        else:
-            console.print(f"[red]x[/red] Failed: {r.stderr}")
+        console.print("[red]x[/red] Permission denied. Run [bold]sudo rm -rf {p}[/bold] manually")
+        raise click.Abort()
 
 
 if __name__ == "__main__":

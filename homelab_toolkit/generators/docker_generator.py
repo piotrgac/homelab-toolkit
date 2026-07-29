@@ -1,3 +1,4 @@
+import re
 import yaml
 from pathlib import Path
 from rich.console import Console
@@ -6,19 +7,19 @@ console = Console()
 
 SERVICE_TEMPLATES = {
     "prometheus": {
-        "image": "prom/prometheus:latest", "ports": ["9090:9090"],
+        "image": "prom/prometheus:v2.53.0", "ports": ["9090:9090"],
         "volumes": ["./data/prometheus:/etc/prometheus"], "restart": "unless-stopped",
     },
     "grafana": {
-        "image": "grafana/grafana:latest", "ports": ["3000:3000"],
+        "image": "grafana/grafana:11.1.0", "ports": ["3000:3000"],
         "volumes": ["./data/grafana:/var/lib/grafana"], "restart": "unless-stopped",
     },
     "alertmanager": {
-        "image": "prom/alertmanager:latest", "ports": ["9093:9093"],
-        "restart": "unless-stopped",
+        "image": "prom/alertmanager:v0.27.0", "ports": ["9093:9093"],
+        "volumes": ["./data/alertmanager:/etc/alertmanager"], "restart": "unless-stopped",
     },
     "node-exporter": {
-        "image": "prom/node-exporter:latest", "ports": ["9100:9100"],
+        "image": "prom/node-exporter:v1.8.1", "ports": ["9100:9100"],
         "restart": "unless-stopped",
     },
     "traefik": {
@@ -27,56 +28,57 @@ SERVICE_TEMPLATES = {
         "restart": "unless-stopped",
     },
     "pi-hole": {
-        "image": "pihole/pihole:latest", "ports": ["53:53/tcp", "53:53/udp", "8053:80/tcp"],
+        "image": "pihole/pihole:2024.07.0", "ports": ["53:53/tcp", "53:53/udp", "8053:80/tcp"],
         "cap_add": ["NET_ADMIN"],
-        "environment": {"TZ": "Europe/Warsaw", "WEBPASSWORD": "${PIHOLE_PASSWORD:-admin}"},
+        "environment": {"TZ": "UTC", "WEBPASSWORD": "${PIHOLE_PASSWORD:-admin}"},
         "restart": "unless-stopped",
     },
     "nginx-proxy-manager": {
-        "image": "jc21/nginx-proxy-manager:latest",
+        "image": "jc21/nginx-proxy-manager:2.11.3",
         "ports": ["80:80", "443:443", "8181:81"],
         "volumes": ["./data/nginx-proxy:/data"], "restart": "unless-stopped",
     },
     "jellyfin": {
-        "image": "jellyfin/jellyfin:latest", "ports": ["8096:8096"],
+        "image": "jellyfin/jellyfin:10.9.6", "ports": ["8096:8096"],
         "volumes": ["./data/jellyfin:/config", "./data/media:/media"],
         "restart": "unless-stopped",
     },
     "radarr": {
-        "image": "linuxserver/radarr:latest", "ports": ["7878:7878"],
+        "image": "linuxserver/radarr:5.7.0", "ports": ["7878:7878"],
         "volumes": ["./data/radarr:/config", "./data/media:/media"],
         "restart": "unless-stopped",
     },
     "sonarr": {
-        "image": "linuxserver/sonarr:latest", "ports": ["8989:8989"],
+        "image": "linuxserver/sonarr:4.0.4", "ports": ["8989:8989"],
         "volumes": ["./data/sonarr:/config", "./data/media:/media"],
         "restart": "unless-stopped",
     },
     "prowlarr": {
-        "image": "linuxserver/prowlarr:latest", "ports": ["9696:9696"],
+        "image": "linuxserver/prowlarr:1.21.0", "ports": ["9696:9696"],
         "restart": "unless-stopped",
     },
     "qbittorrent": {
-        "image": "linuxserver/qbittorrent:latest",
+        "image": "linuxserver/qbittorrent:4.6.5",
         "ports": ["8080:8080", "6881:6881"],
         "volumes": ["./data/qbittorrent:/config", "./data/downloads:/downloads"],
         "restart": "unless-stopped",
     },
     "nextcloud": {
-        "image": "nextcloud:latest", "ports": ["8081:80"],
+        "image": "nextcloud:29.0.2", "ports": ["8081:80"],
         "volumes": ["./data/nextcloud:/var/www/html"],
         "restart": "unless-stopped",
     },
     "samba": {
-        "image": "dperson/samba:latest", "ports": ["139:139", "445:445"],
+        "image": "dperson/samba:2024-07-08", "ports": ["139:139", "445:445"],
         "volumes": ["./data/samba:/mount"], "restart": "unless-stopped",
     },
     "authelia": {
-        "image": "authelia/authelia:latest", "ports": ["9091:9091"],
+        "image": "authelia/authelia:4.38.7", "ports": ["9091:9091"],
         "volumes": ["./data/authelia:/config"], "restart": "unless-stopped",
     },
     "vault": {
-        "image": "hashicorp/vault:latest", "ports": ["8200:8200"],
+        "image": "hashicorp/vault:1.17.2", "ports": ["8200:8200"],
+        "volumes": ["./data/vault:/vault/file"],
         "cap_add": ["IPC_LOCK"], "restart": "unless-stopped",
     },
     "postgres": {
@@ -96,19 +98,19 @@ SERVICE_TEMPLATES = {
         "restart": "unless-stopped",
     },
     "portainer": {
-        "image": "portainer/portainer-ce:latest",
+        "image": "portainer/portainer-ce:2.20.3",
         "ports": ["9000:9000", "8000:8000"],
         "volumes": ["/var/run/docker.sock:/var/run/docker.sock", "./data/portainer:/data"],
         "restart": "unless-stopped",
     },
     "code-server": {
-        "image": "codercom/code-server:latest", "ports": ["8443:8443"],
+        "image": "codercom/code-server:4.91.1", "ports": ["8443:8443"],
         "volumes": ["./data/code-server:/home/coder/project"],
         "environment": {"PASSWORD": "${CODESERVER_PASSWORD:-changeme}"},
         "restart": "unless-stopped",
     },
     "gitlab": {
-        "image": "gitlab/gitlab-ce:latest",
+        "image": "gitlab/gitlab-ce:17.2.2-ce.0",
         "ports": ["8929:80", "2224:22"],
         "volumes": [
             "./data/gitlab/config:/etc/gitlab",
@@ -121,11 +123,11 @@ SERVICE_TEMPLATES = {
 
 
 class DockerGenerator:
-    def __init__(self, dry_run=False, output_dir=Path("output")):
+    def __init__(self, dry_run: bool = False, output_dir: Path = Path("output")) -> None:
         self.dry_run = dry_run
         self.output_dir = output_dir
 
-    def generate(self, config):
+    def generate(self, config: dict) -> None:
         services = config.get("homelab", {}).get("services", {})
         if not isinstance(services, dict):
             services = {}
@@ -164,12 +166,13 @@ class DockerGenerator:
                 s["networks"] = ["homelab"]
                 docker_services[service_name] = s
 
+        subnet = config.get("homelab", {}).get("network", {}).get("subnet", "172.20.0.0/16")
         compose = {
             "services": docker_services,
             "networks": {
                 "homelab": {
                     "driver": "bridge",
-                    "ipam": {"config": [{"subnet": "172.20.0.0/16"}]},
+                    "ipam": {"config": [{"subnet": subnet}]},
                 }
             },
         }
@@ -186,9 +189,10 @@ class DockerGenerator:
         env_vars = {}
         for svc in docker_services.values():
             for k, v in svc.get("environment", {}).items():
-                if isinstance(v, str) and v.startswith("${") and ":-" in v:
-                    default = v.split(":-")[1].rstrip("}")
-                    env_vars[k] = default
+                if isinstance(v, str) and v.startswith("${"):
+                    m = re.match(r'^\$\{([^:]+):-([^}]*)\}$', v)
+                    if m:
+                        env_vars[k] = m.group(2)
         if env_vars:
             lines = [f"# Generated by homelab-toolkit - override these" ]
             for k, v in sorted(env_vars.items()):

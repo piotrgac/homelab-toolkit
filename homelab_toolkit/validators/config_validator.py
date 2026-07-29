@@ -1,8 +1,9 @@
 from homelab_toolkit.generators.docker_generator import SERVICE_TEMPLATES
+from homelab_toolkit.utils.network import validate_subnet
 
 
 class ConfigValidator:
-    def validate(self, config):
+    def validate(self, config: dict) -> list:
         errors = []
 
         if not isinstance(config, dict):
@@ -25,6 +26,8 @@ class ConfigValidator:
             errors.append("'homelab.network' must be a dictionary")
         elif "subnet" not in net:
             errors.append("Missing 'homelab.network.subnet' (e.g. 192.168.1.0/24)")
+        elif not validate_subnet(net.get("subnet", "")):
+            errors.append(f"Invalid subnet '{net.get('subnet')}'")
 
         services = homelab.get("services")
         if not services:

@@ -5,11 +5,11 @@ console = Console()
 
 
 class TerraformGenerator:
-    def __init__(self, dry_run=False, output_dir=Path("output")):
+    def __init__(self, dry_run: bool = False, output_dir: Path = Path("output")) -> None:
         self.dry_run = dry_run
         self.output_dir = output_dir
 
-    def generate(self, config):
+    def generate(self, config: dict) -> None:
         homelab = config.get("homelab", {})
         net = homelab.get("network", {})
 
@@ -58,7 +58,7 @@ locals {{
 }}
 
 resource "docker_network" "net" {{
-  name = "${{{{local.name}}}}-net"
+  name = "${{local.name}}-net"
   ipam_config {{
     subnet  = local.subnet
     gateway = local.gw
@@ -66,24 +66,24 @@ resource "docker_network" "net" {{
 }}
 
 resource "docker_volume" "data" {{
-  name = "${{{{local.name}}}}-data"
+  name = "${{local.name}}-data"
 }}
 
 resource "libvirt_network" "net" {{
-  name   = "${{{{local.name}}}}-net"
+  name   = "${{local.name}}-net"
   mode   = "nat"
-  domain = "${{{{local.name}}}}.local"
+  domain = "${{local.name}}.local"
   addresses = [local.subnet]
 }}
 
 resource "libvirt_volume" "os" {{
-  name   = "${{{{local.name}}}}-os"
+  name   = "${{local.name}}-os"
   source = "https://dl.rockylinux.org/vault/rocky/9/images/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
   format = "qcow2"
 }}
 
 resource "libvirt_domain" "vm" {{
-  name   = "${{{{local.name}}}}-vm"
+  name   = "${{local.name}}-vm"
   memory = "2048"
   vcpu   = 2
   network_interface {{
@@ -96,15 +96,15 @@ resource "libvirt_domain" "vm" {{
 }}
 
 resource "libvirt_cloudinit_disk" "ci" {{
-  name = "${{{{local.name}}}}-cloudinit.iso"
+  name = "${{local.name}}-cloudinit.iso"
   user_data = <<-EOF
 #cloud-config
-hostname: ${{{{local.name}}}}
+hostname: ${{local.name}}
 users:
   - name: admin
     sudo: ALL=(ALL) NOPASSWD:ALL
     ssh_authorized_keys:
-      - ${{{{file("~/.ssh/id_rsa.pub")}}}}
+      - ${{file("~/.ssh/id_rsa.pub")}}
 packages:
   - docker
   - docker-compose-plugin
@@ -114,7 +114,7 @@ EOF
 }}
 
 output "compose_content" {{
-  value = templatefile("${{{{abspath(path.module)}}}}/../docker-compose.yml", {{}})
+  value = templatefile("${{abspath(path.module)}}/../docker-compose.yml", {{}})
 }}
 """
         self._write_file(tf / "main.tf", content)

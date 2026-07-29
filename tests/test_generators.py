@@ -229,6 +229,12 @@ class TestTerraformGenerator:
         assert "templatefile(" in t
         assert "template_file" not in t
 
+    def test_correct_interpolation_syntax(self, full_config, tmp_path):
+        TerraformGenerator(output_dir=tmp_path).generate(full_config)
+        t = (tmp_path / "terraform" / "main.tf").read_text()
+        assert "${local.name}" in t
+        assert "${{local.name}}" not in t
+
     def test_dry(self, full_config, tmp_path):
         TerraformGenerator(dry_run=True, output_dir=tmp_path).generate(full_config)
         assert not (tmp_path / "terraform").exists()
@@ -263,6 +269,14 @@ class TestAnsibleGenerator:
         content = (tmp_path / "ansible" / "playbooks" / "backup.yml").read_text()
         assert "docker volume ls" in content
 
+    def test_site_yml_uses_image_names(self, full_config, tmp_path):
+        AnsibleGenerator(output_dir=tmp_path).generate(full_config)
+        content = (tmp_path / "ansible" / "playbooks" / "site.yml").read_text()
+        assert "prom/prometheus" in content
+        assert "grafana/grafana" in content
+        assert "jellyfin/jellyfin" in content
+        assert "linuxserver/radarr" in content
+
 
 class TestUtils:
     def test_subnet_ok(self):
@@ -282,7 +296,7 @@ class TestTemplates:
             assert "restart" in t, f"{n} no restart"
 
     def test_count(self):
-        assert len(SERVICE_TEMPLATES) >= 20
+        assert len(SERVICE_TEMPLATES) == 22
 
 
 class TestPortChecker:
@@ -300,4 +314,4 @@ class TestPortChecker:
 
     def test_find_available_returns_int(self):
         p = PortChecker().find_available()
-        assert p is None or isinstance(p, int)
+        assert p is None or 8000 <= p <= 9000
