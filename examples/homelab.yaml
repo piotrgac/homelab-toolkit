@@ -1,0 +1,72 @@
+homelab:
+  name: "my-homelab"
+  description: "Personal homelab for testing and learning"
+  network:
+    subnet: "192.168.1.0/24"
+    gateway: "192.168.1.1"
+    dns:
+      - "1.1.1.1"
+      - "8.8.8.8"
+
+services:
+  monitoring:
+    enabled: true
+    stack:
+      - prometheus
+      - grafana
+      - alertmanager
+      - node-exporter
+    ports:
+      prometheus: 9090
+      grafana: 3000
+      alertmanager: 9093
+      node-exporter: 9100
+
+  networking:
+    enabled: true
+    stack:
+      - traefik
+      - pi-hole
+
+  media:
+    enabled: true
+    stack:
+      - jellyfin
+      - radarr
+      - sonarr
+      - prowlarr
+      - qbittorrent
+    ports:
+      jellyfin: 8096
+      qbittorrent: 8080
+
+  storage:
+    enabled: false
+    stack:
+      - nextcloud
+
+  development:
+    enabled: true
+    stack:
+      - portainer
+      - code-server
+
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention_days: 7
+  destination: "/mnt/backup/homelab"
+
+# Custom services defined outside the built-in list
+custom_templates:
+  my-api:
+    image: "my-api:latest"
+    ports: ["4000:4000"]
+    environment:
+      DB_HOST: postgres
+      DB_NAME: myapp
+  my-frontend:
+    image: "my-frontend:latest"
+    ports: ["3000:3000"]
+    environment:
+      API_URL: http://my-api:4000
